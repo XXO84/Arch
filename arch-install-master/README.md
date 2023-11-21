@@ -82,7 +82,7 @@ Next, download and unpack the `arch-install` repository:
 ((  curl -L https://github.com/XXO84/Arch/tree/main/archive/arch-install-master.tar.gz | tar zxvf -
 arch-install-master/arch-install.sh    ))
 
-curl -L https://github.com/wrzlbrmft/arch-install/archive/master.tar.gz | tar zxvf -
+curl -L https://github.com/XXO84/Arch/tree/main/archive/arch-install-master.tar.gz | tar zxvf -
 arch-install-master/arch-install.sh
 ```
 

@@ -75,12 +75,7 @@ jobs:
             --name apklab_api28 \
             --package 'system-images;android-28;default;x86' \
             --device 'pixel_2'
-          printf '%s\n' \
-            'hw.ramSize=1536' \
-            'hw.gpu.enabled=yes' \
-            'hw.gpu.mode=swiftshader_indirect' \
-            'disk.dataPartition.size=2048M' \
-            >> "$HOME/.android/avd/apklab_api28.avd/config.ini"
+          avdmanager list avd
 
       - name: Start emulator
         shell: bash
@@ -90,6 +85,8 @@ jobs:
             -no-audio \
             -no-boot-anim \
             -no-snapshot \
+            -memory 1536 \
+            -partition-size 2048 \
             -gpu swiftshader_indirect \
             -accel auto \
             > emulator.log 2>&1 &

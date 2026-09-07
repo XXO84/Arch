@@ -12,6 +12,11 @@ on:
     paths:
       - '.github/workflows/apklab-android.yml'
       - 'apklab/**'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/apklab-android.yml'
+      - 'apklab/**'
 
 permissions:
   contents: read

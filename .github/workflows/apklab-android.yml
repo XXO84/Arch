@@ -90,16 +90,25 @@ jobs:
       - name: Create AVD
         shell: bash
         run: |
+          export ANDROID_USER_HOME="$HOME/.android"
+          export ANDROID_AVD_HOME="$HOME/.android/avd"
+          mkdir -p "$ANDROID_USER_HOME" "$ANDROID_AVD_HOME"
+          echo "ANDROID_USER_HOME=$ANDROID_USER_HOME" >> "$GITHUB_ENV"
+          echo "ANDROID_AVD_HOME=$ANDROID_AVD_HOME" >> "$GITHUB_ENV"
           echo 'no' | avdmanager create avd \
             --force \
             --name apklab_api34 \
             --package 'system-images;android-34;aosp_atd;x86_64' \
             --device 'pixel_2'
           avdmanager list avd
+          test -f "$ANDROID_AVD_HOME/apklab_api34.ini"
+          test -d "$ANDROID_AVD_HOME/apklab_api34.avd"
 
       - name: Start emulator
         shell: bash
         run: |
+          echo "ANDROID_AVD_HOME=$ANDROID_AVD_HOME"
+          "$ANDROID_HOME/emulator/emulator" -list-avds
           nohup "$ANDROID_HOME/emulator/emulator" @apklab_api34 \
             -no-window \
             -no-audio \

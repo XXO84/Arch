@@ -1,16 +1,3 @@
 plugins {
-    id 'com.android.application' version '9.0.1'
-}
-
-android {
-    namespace 'com.apklab.smoke'
-    compileSdk 28
-
-    defaultConfig {
-        applicationId 'com.apklab.smoke'
-        minSdk 21
-        targetSdk 28
-        versionCode 1
-        versionName '1.0'
-    }
+    id 'com.android.application' version '9.0.1' apply false
 }

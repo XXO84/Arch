@@ -62,6 +62,13 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
+      - name: Install emulator host libraries
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libpulse0
+          ldconfig -p | grep 'libpulse.so.0'
+
       - name: Install Android packages
         shell: bash
         run: |
@@ -75,6 +82,13 @@ jobs:
           export PATH="$ANDROID_HOME/emulator:$ANDROID_HOME/platform-tools:$PATH"
           echo "$ANDROID_HOME/emulator" >> "$GITHUB_PATH"
           echo "$ANDROID_HOME/platform-tools" >> "$GITHUB_PATH"
+          echo '=== Emulator dynamic libraries ==='
+          ldd "$ANDROID_HOME/emulator/qemu/linux-x86_64/qemu-system-x86_64" | tee emulator-ldd.txt
+          if grep -q 'not found' emulator-ldd.txt; then
+            echo 'Missing emulator host libraries:'
+            grep 'not found' emulator-ldd.txt
+            exit 1
+          fi
           "$ANDROID_HOME/emulator/emulator" -version
           adb version
 
@@ -154,6 +168,7 @@ jobs:
           path: |
             apklab/reports/**
             emulator.log
+            emulator-ldd.txt
           if-no-files-found: warn
           retention-days: 14
 

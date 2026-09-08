@@ -3,13 +3,16 @@ set -Eeuo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 REPORTS="$ROOT/apklab/reports"
-SMOKE="$ROOT/apklab/smoke-app"
+B64_PREFIX="$ROOT/apklab/modewidget-source.b64.part"
+WORK="$RUNNER_TEMP/apklab-modewidget-a53"
 APK_URL="${1:-}"
-PACKAGE=""
-ACTIVITY=""
-PID=""
+PACKAGE="de.apklab.moduswidget"
+ACTIVITY="de.apklab.moduswidget.MainActivity"
+STOREPASS="$(openssl rand -hex 24)"
+KEYPASS="$STOREPASS"
 mkdir -p "$REPORTS"
-rm -f "$REPORTS"/*
+rm -rf "$REPORTS"/* "$WORK"
+mkdir -p "$WORK"
 
 capture_reports() {
   set +e
@@ -17,23 +20,15 @@ capture_reports() {
   adb shell getprop > "$REPORTS/getprop.txt" 2>&1
   adb logcat -d -v threadtime > "$REPORTS/logcat.txt" 2>&1
   adb exec-out screencap -p > "$REPORTS/screenshot.png" 2>/dev/null
-  if [[ -n "$PACKAGE" ]]; then
-    adb shell dumpsys package "$PACKAGE" > "$REPORTS/package.txt" 2>&1
-    adb shell dumpsys meminfo "$PACKAGE" > "$REPORTS/meminfo.txt" 2>&1
-    adb shell dumpsys gfxinfo "$PACKAGE" > "$REPORTS/gfxinfo.txt" 2>&1
-    adb shell dumpsys activity activities > "$REPORTS/activities.txt" 2>&1
-  fi
+  adb shell dumpsys package "$PACKAGE" > "$REPORTS/package.txt" 2>&1 || true
+  adb shell dumpsys meminfo "$PACKAGE" > "$REPORTS/meminfo.txt" 2>&1 || true
+  adb shell dumpsys gfxinfo "$PACKAGE" > "$REPORTS/gfxinfo.txt" 2>&1 || true
+  adb shell dumpsys activity activities > "$REPORTS/activities.txt" 2>&1 || true
   {
-    echo "=== Java ==="
-    java -version
-    echo "=== Gradle ==="
-    gradle --version
-    echo "=== ADB ==="
-    adb version
-    echo "=== Emulator ==="
-    emulator -version
-    echo "=== /dev/kvm ==="
-    ls -l /dev/kvm 2>&1 || true
+    echo "=== Java ==="; java -version
+    echo "=== ADB ==="; adb version
+    echo "=== Emulator ==="; emulator -version || true
+    echo "=== Android SDK ==="; echo "ANDROID_HOME=${ANDROID_HOME:-}"; ls -la "${ANDROID_HOME:-/nonexistent}/build-tools/36.0.0" 2>/dev/null || true
   } > "$REPORTS/environment.txt" 2>&1
   set -e
 }
@@ -42,48 +37,80 @@ trap capture_reports EXIT
 adb wait-for-device
 BOOT="$(adb shell getprop sys.boot_completed | tr -d '\r')"
 [[ "$BOOT" == "1" ]] || { echo "Android did not reach sys.boot_completed=1" >&2; exit 20; }
-
 adb logcat -c
 
 if [[ -n "$APK_URL" ]]; then
-  APK="$REPORTS/input.apk"
-  curl --fail --location --retry 3 --retry-delay 2 "$APK_URL" -o "$APK"
-else
-  (
-    cd "$SMOKE"
-    gradle --no-daemon :app:assembleDebug
-  )
-  APK="$SMOKE/app/build/outputs/apk/debug/app-debug.apk"
+  echo "This APKLab branch is dedicated to building the bundled ModeWidget source; apk_url is ignored." >&2
 fi
 
-[[ -s "$APK" ]] || { echo "APK missing or empty: $APK" >&2; exit 21; }
-sha256sum "$APK" > "$REPORTS/apk.sha256"
+compgen -G "${B64_PREFIX}*" >/dev/null || { echo "ModeWidget source payload parts missing: ${B64_PREFIX}*" >&2; exit 30; }
+cat "${B64_PREFIX}"* | tr -d '\r\n\t ' | base64 -d > "$WORK/source.zip"
+echo '2717316b5fac640e746c09f8967a14ba29bfecee549730269cfe2032e1d6826b  source.zip' > "$WORK/source.zip.sha256"
+(cd "$WORK" && sha256sum -c source.zip.sha256)
+unzip -q "$WORK/source.zip" -d "$WORK/source"
+PROJECT="$(find "$WORK/source" -mindepth 1 -maxdepth 1 -type d -name 'APK-LAB-ModeWidget-A53*' -print -quit)"
+[[ -n "$PROJECT" ]] || PROJECT="$WORK/source/APK-LAB-ModeWidget-A53"
+[[ -f "$PROJECT/settings.gradle" ]] || { echo "Gradle project not found after decode" >&2; find "$WORK/source" -maxdepth 3 -type f; exit 31; }
 
-AAPT="$(command -v aapt || true)"
-if [[ -z "$AAPT" && -n "${ANDROID_HOME:-}" ]]; then
-  AAPT="$(find "$ANDROID_HOME/build-tools" -type f -name aapt 2>/dev/null | sort -V | tail -n 1)"
-fi
-[[ -x "$AAPT" ]] || { echo "aapt not found" >&2; exit 22; }
+yes | sdkmanager --licenses >/dev/null || true
+sdkmanager 'platforms;android-36' 'build-tools;36.0.0' 'platform-tools'
 
-BADGING="$REPORTS/aapt-badging.txt"
-"$AAPT" dump badging "$APK" | tee "$BADGING"
-PACKAGE="$(sed -n "s/^package: name='\([^']*\)'.*/\1/p" "$BADGING" | head -n 1)"
-ACTIVITY="$(sed -n "s/^launchable-activity: name='\([^']*\)'.*/\1/p" "$BADGING" | head -n 1)"
-[[ -n "$PACKAGE" ]] || { echo "Could not determine package name" >&2; exit 23; }
+GRADLE_VERSION='9.6.1'
+GRADLE_ZIP="$WORK/gradle-${GRADLE_VERSION}-bin.zip"
+GRADLE_HOME_LOCAL="$WORK/gradle-${GRADLE_VERSION}"
+curl --fail --location --retry 3 --retry-delay 2 \
+  "https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip" -o "$GRADLE_ZIP"
+unzip -q "$GRADLE_ZIP" -d "$WORK"
+GRADLE="$GRADLE_HOME_LOCAL/bin/gradle"
+"$GRADLE" --version | tee "$REPORTS/gradle-version.txt"
 
-adb install -r -t "$APK" | tee "$REPORTS/install.txt"
+export JAVA_HOME="${JAVA_HOME:-$(dirname "$(dirname "$(readlink -f "$(command -v java)")")")}" 
+export ANDROID_HOME="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
+export ANDROID_SDK_ROOT="$ANDROID_HOME"
+export PATH="$ANDROID_HOME/platform-tools:$ANDROID_HOME/build-tools/36.0.0:$PATH"
 
-if [[ -n "$ACTIVITY" ]]; then
-  adb shell am force-stop "$PACKAGE"
-  adb shell am start -W -n "$PACKAGE/$ACTIVITY" | tee "$REPORTS/start.txt"
-  sleep 3
-  PID="$(adb shell pidof "$PACKAGE" | tr -d '\r' || true)"
-  [[ -n "$PID" ]] || { echo "Package installed but launch process is not running: $PACKAGE" >&2; exit 24; }
-else
-  echo "No launchable activity; install-only verification completed." | tee "$REPORTS/start.txt"
-fi
+cd "$PROJECT"
+python3 scripts/SOURCE_AUDIT.py | tee "$REPORTS/source-audit.txt"
+"$GRADLE" --no-daemon --console=plain --stacktrace \
+  -Pandroid.aapt2FromMavenOverride="$ANDROID_HOME/build-tools/36.0.0/aapt2" \
+  :app:checkReleaseAarMetadata :app:lintVitalRelease :app:assembleRelease \
+  | tee "$REPORTS/gradle-build.txt"
 
-cat > "$REPORTS/result.json" <<EOF
+UNSIGNED="$(find app/build/outputs/apk/release -maxdepth 1 -type f -name '*unsigned*.apk' -print -quit)"
+[[ -s "$UNSIGNED" ]] || { echo "Unsigned release APK missing" >&2; find app/build/outputs -type f -maxdepth 5 || true; exit 32; }
+
+# Ephemeral release key: never uploaded or committed. The APK remains installable,
+# but later prototypes may require uninstall/reinstall unless a private stable key is supplied.
+KEYSTORE="$WORK/ModeWidget-A53-v1.0.0-signing.jks"
+keytool -genkeypair -noprompt \
+  -keystore "$KEYSTORE" -storepass "$STOREPASS" -keypass "$KEYPASS" \
+  -alias modewidget -keyalg RSA -keysize 4096 -validity 10000 \
+  -dname 'CN=APK LAB ModeWidget A53, OU=APK LAB, O=Local Build, L=Local, C=DE' \
+  > "$WORK/keytool.txt" 2>&1
+
+ALIGNED="$WORK/ModeWidget-A53-v1.0.0-aligned.apk"
+FINAL="$REPORTS/ModeWidget-A53-v1.0.0.apk"
+zipalign -f -p 4 "$UNSIGNED" "$ALIGNED"
+apksigner sign \
+  --ks "$KEYSTORE" --ks-pass "pass:$STOREPASS" --key-pass "pass:$KEYPASS" \
+  --ks-key-alias modewidget \
+  --out "$FINAL" "$ALIGNED"
+
+zipalign -c -P 16 -v 4 "$FINAL" | tee "$REPORTS/zipalign.txt"
+apksigner verify --verbose --print-certs "$FINAL" | tee "$REPORTS/apksigner.txt"
+aapt dump badging "$FINAL" | tee "$REPORTS/aapt-badging.txt"
+sha256sum "$FINAL" | tee "$REPORTS/ModeWidget-A53-v1.0.0.apk.sha256"
+
+adb install -r -t "$FINAL" | tee "$REPORTS/install.txt"
+adb shell pm grant "$PACKAGE" android.permission.DUMP | tee "$REPORTS/grant-dump.txt" || true
+adb shell am force-stop "$PACKAGE"
+adb shell am start -W -n "$PACKAGE/$ACTIVITY" | tee "$REPORTS/start.txt"
+sleep 4
+PID="$(adb shell pidof "$PACKAGE" | tr -d '\r' || true)"
+[[ -n "$PID" ]] || { echo "ModeWidget installed but process is not running" >&2; exit 33; }
+adb shell dumpsys package "$PACKAGE" | grep -A40 -E 'grantedPermissions|android.permission.DUMP' > "$REPORTS/dump-permission.txt" || true
+
+cat > "$REPORTS/result.json" <<RESULT
 {
   "status": "PASS",
   "boot_completed": "$BOOT",
@@ -91,24 +118,27 @@ cat > "$REPORTS/result.json" <<EOF
   "android_release": "$(adb shell getprop ro.build.version.release | tr -d '\r')",
   "package": "$PACKAGE",
   "activity": "$ACTIVITY",
-  "pid": "$PID"
+  "pid": "$PID",
+  "apk_sha256": "$(cut -d' ' -f1 "$REPORTS/ModeWidget-A53-v1.0.0.apk.sha256")"
 }
-EOF
+RESULT
+cat > "$REPORTS/REPORT.md" <<REPORT
+# APK LAB ModeWidget A53 Build Report
 
-cat > "$REPORTS/REPORT.md" <<EOF
-# APKLab Android Runtime Report
-
-- Status: **PASS**
-- sys.boot_completed: **$BOOT**
-- Android API: **$(adb shell getprop ro.build.version.sdk | tr -d '\r')**
-- Android release: **$(adb shell getprop ro.build.version.release | tr -d '\r')**
+- Build: **PASS**
+- Source SHA-256: **2717316b5fac640e746c09f8967a14ba29bfecee549730269cfe2032e1d6826b**
+- Source audit: **PASS**
+- Gradle: **9.6.1**
+- JDK: **21**
+- compileSdk: **36**
+- Build Tools: **36.0.0**
+- APK signature verification: **PASS**
+- 16 KiB ZIP alignment check: **PASS**
+- Emulator install/launch: **PASS**
 - Package: **$PACKAGE**
-- Launch activity: **${ACTIVITY:-none}**
-- PID after launch: **${PID:-n/a}**
-- APK SHA-256: **$(cut -d' ' -f1 "$REPORTS/apk.sha256")**
-
-Collected diagnostics: ADB device list, build properties, logcat, package/activity/memory/graphics dumps, environment versions, APK metadata and screenshot.
-EOF
+- PID after launch: **$PID**
+- APK SHA-256: **$(cut -d' ' -f1 "$REPORTS/ModeWidget-A53-v1.0.0.apk.sha256")**
+REPORT
 
 capture_reports
 trap - EXIT

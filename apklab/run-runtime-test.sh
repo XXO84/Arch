@@ -44,13 +44,14 @@ if [[ -n "$APK_URL" ]]; then
 fi
 
 compgen -G "${B64_PREFIX}*" >/dev/null || { echo "ModeWidget source payload parts missing: ${B64_PREFIX}*" >&2; exit 30; }
-cat "${B64_PREFIX}"* | base64 -d > "$WORK/source.zip"
+cat "${B64_PREFIX}"* | tr -d '\r\n\t ' | base64 -d > "$WORK/source.zip"
+echo '2717316b5fac640e746c09f8967a14ba29bfecee549730269cfe2032e1d6826b  source.zip' > "$WORK/source.zip.sha256"
+(cd "$WORK" && sha256sum -c source.zip.sha256)
 unzip -q "$WORK/source.zip" -d "$WORK/source"
 PROJECT="$(find "$WORK/source" -mindepth 1 -maxdepth 1 -type d -name 'APK-LAB-ModeWidget-A53*' -print -quit)"
 [[ -n "$PROJECT" ]] || PROJECT="$WORK/source/APK-LAB-ModeWidget-A53"
 [[ -f "$PROJECT/settings.gradle" ]] || { echo "Gradle project not found after decode" >&2; find "$WORK/source" -maxdepth 3 -type f; exit 31; }
 
-# Exact persistent APK-LAB toolchain versions requested for this project.
 yes | sdkmanager --licenses >/dev/null || true
 sdkmanager 'platforms;android-36' 'build-tools;36.0.0' 'platform-tools'
 
@@ -78,12 +79,14 @@ python3 scripts/SOURCE_AUDIT.py | tee "$REPORTS/source-audit.txt"
 UNSIGNED="$(find app/build/outputs/apk/release -maxdepth 1 -type f -name '*unsigned*.apk' -print -quit)"
 [[ -s "$UNSIGNED" ]] || { echo "Unsigned release APK missing" >&2; find app/build/outputs -type f -maxdepth 5 || true; exit 32; }
 
-KEYSTORE="$REPORTS/ModeWidget-A53-v1.0.0-signing.jks"
+# Ephemeral release key: never uploaded or committed. The APK remains installable,
+# but later prototypes may require uninstall/reinstall unless a private stable key is supplied.
+KEYSTORE="$WORK/ModeWidget-A53-v1.0.0-signing.jks"
 keytool -genkeypair -noprompt \
   -keystore "$KEYSTORE" -storepass "$STOREPASS" -keypass "$KEYPASS" \
   -alias modewidget -keyalg RSA -keysize 4096 -validity 10000 \
   -dname 'CN=APK LAB ModeWidget A53, OU=APK LAB, O=Local Build, L=Local, C=DE' \
-  > "$REPORTS/keytool.txt" 2>&1
+  > "$WORK/keytool.txt" 2>&1
 
 ALIGNED="$WORK/ModeWidget-A53-v1.0.0-aligned.apk"
 FINAL="$REPORTS/ModeWidget-A53-v1.0.0.apk"
@@ -97,14 +100,7 @@ zipalign -c -P 16 -v 4 "$FINAL" | tee "$REPORTS/zipalign.txt"
 apksigner verify --verbose --print-certs "$FINAL" | tee "$REPORTS/apksigner.txt"
 aapt dump badging "$FINAL" | tee "$REPORTS/aapt-badging.txt"
 sha256sum "$FINAL" | tee "$REPORTS/ModeWidget-A53-v1.0.0.apk.sha256"
-cat > "$REPORTS/SIGNING_KEY_README.txt" <<KEYINFO
-Keep ModeWidget-A53-v1.0.0-signing.jks for future updates of this APK.
-Alias: modewidget
-Store password: $STOREPASS
-Key password: $KEYPASS
-KEYINFO
 
-# Runtime smoke test in APK LAB emulator.
 adb install -r -t "$FINAL" | tee "$REPORTS/install.txt"
 adb shell pm grant "$PACKAGE" android.permission.DUMP | tee "$REPORTS/grant-dump.txt" || true
 adb shell am force-stop "$PACKAGE"
@@ -112,8 +108,6 @@ adb shell am start -W -n "$PACKAGE/$ACTIVITY" | tee "$REPORTS/start.txt"
 sleep 4
 PID="$(adb shell pidof "$PACKAGE" | tr -d '\r' || true)"
 [[ -n "$PID" ]] || { echo "ModeWidget installed but process is not running" >&2; exit 33; }
-
-# Confirm the development DUMP grant and that SensorService is callable from the installed UID via app context later.
 adb shell dumpsys package "$PACKAGE" | grep -A40 -E 'grantedPermissions|android.permission.DUMP' > "$REPORTS/dump-permission.txt" || true
 
 cat > "$REPORTS/result.json" <<RESULT
@@ -132,6 +126,7 @@ cat > "$REPORTS/REPORT.md" <<REPORT
 # APK LAB ModeWidget A53 Build Report
 
 - Build: **PASS**
+- Source SHA-256: **2717316b5fac640e746c09f8967a14ba29bfecee549730269cfe2032e1d6826b**
 - Source audit: **PASS**
 - Gradle: **9.6.1**
 - JDK: **21**
@@ -144,12 +139,6 @@ cat > "$REPORTS/REPORT.md" <<REPORT
 - PID after launch: **$PID**
 - APK SHA-256: **$(cut -d' ' -f1 "$REPORTS/ModeWidget-A53-v1.0.0.apk.sha256")**
 REPORT
-
-# Text fallback so ChatGPT can recover the binary even if artifact mounting is unavailable.
-echo '===APK_BASE64_BEGIN==='
-base64 -w 0 "$FINAL"
-echo
-echo '===APK_BASE64_END==='
 
 capture_reports
 trap - EXIT

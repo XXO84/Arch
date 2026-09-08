@@ -8,7 +8,7 @@ on:
         required: false
         default: ''
   push:
-    branches: [ main ]
+    branches: [ main, apklab-modewidget-a53-build ]
     paths:
       - '.github/workflows/apklab-android.yml'
       - 'apklab/**'

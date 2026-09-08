@@ -22,8 +22,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: apklab-android-runtime
-  cancel-in-progress: true
+  group: apklab-android-runtime-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: false
 
 env:
   JAVA_VERSION: '21'

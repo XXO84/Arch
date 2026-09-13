@@ -30,10 +30,21 @@ jobs:
         shell: pwsh
         run: |
           Copy-Item crimson-absolute-survival/absolute_survival_main.cpp TrinitySrc/src/absolute_survival_main.cpp -Force
+          Copy-Item crimson-absolute-survival/resource_guard.cpp TrinitySrc/src/resource_guard.cpp -Force
+          Copy-Item crimson-absolute-survival/resource_guard.h TrinitySrc/src/resource_guard.h -Force
           Copy-Item crimson-absolute-survival/durability_guard.cpp TrinitySrc/src/durability_guard.cpp -Force
           Copy-Item crimson-absolute-survival/durability_guard.h TrinitySrc/src/durability_guard.h -Force
           Copy-Item crimson-absolute-survival/CMakeLists.txt TrinitySrc/CMakeLists.txt -Force
           & ./crimson-absolute-survival/patch_upstream.ps1
+
+          $patchedPlayer = Get-Content -Raw TrinitySrc/src/game/player.cpp
+          $patchedInv = Get-Content -Raw TrinitySrc/src/game/inventory.cpp
+          $patchedLogger = Get-Content -Raw TrinitySrc/src/core/logger.h
+          if ($patchedPlayer -notmatch 'IsStaminaType\(int32_t t\) \{ return t == 19; \}') { throw 'Stamina type 19 patch missing' }
+          if ($patchedPlayer -notmatch 't == 20 \|\| t == 17 \|\| t == 18 \|\| t == 21') { throw 'Spirit/action pool patch missing' }
+          if ($patchedPlayer -notmatch 'InSet\(g_targetOwners, kMaxPlayers') { throw 'Incoming damage guard missing' }
+          if ($patchedInv -notmatch 'origCap == 0 \|\| origVal <= 1 \|\| origVal >= value') { throw 'Safe stack guard missing' }
+          if ($patchedLogger -notmatch 'AbsoluteSurvival\.log') { throw 'File logger patch missing' }
 
       - name: Configure x64 Release
         shell: pwsh
@@ -67,7 +78,7 @@ jobs:
 
           $hash = (Get-FileHash $asi -Algorithm SHA256).Hash
           "CrimsonDesert_AbsoluteSurvival.asi SHA256=$hash" | Set-Content package/SHA256.txt -Encoding ascii
-          Compress-Archive -Path package/* -DestinationPath CrimsonDesert_AbsoluteSurvival_v1.1.1.zip -Force
+          Compress-Archive -Path package/* -DestinationPath CrimsonDesert_AbsoluteSurvival_v1.2.0_AUDITED_2.02.zip -Force
           Write-Host "ASI SHA256: $hash"
           Write-Host "ASI size: $($bytes.Length)"
           Write-Host ('PE Machine: 0x{0:X4}' -f $machine)
@@ -75,7 +86,7 @@ jobs:
       - name: Upload compiled mod
         uses: actions/upload-artifact@v4
         with:
-          name: CrimsonDesert_AbsoluteSurvival_v1.1.1
-          path: CrimsonDesert_AbsoluteSurvival_v1.1.1.zip
+          name: CrimsonDesert_AbsoluteSurvival_v1.2.0_AUDITED_2.02
+          path: CrimsonDesert_AbsoluteSurvival_v1.2.0_AUDITED_2.02.zip
           if-no-files-found: error
           retention-days: 7

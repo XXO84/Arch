@@ -1,8 +1,8 @@
-Crimson Desert - Absolute Survival v1.2.0 AUDITED-2.02
-======================================================
+Crimson Desert - Absolute Survival v1.2.0 AUDITED-2.02 NO-STACK
+===============================================================
 
 ZIEL
-- Absolute Spielerschutz ohne Inventar-/Itemverbrauch zu veraendern.
+- Absolute Spielerschutz ohne Inventar-, Item- oder Stack-Verhalten zu veraendern.
 - Gegen den aktuellen Crimson-Desert-Stand 2.02.00 quellenbasiert gepruefte
   Runtime-Pfade verwenden und bei unbekannten Signaturen sauber aussteigen.
 
@@ -10,7 +10,7 @@ AKTUELLER SPIELSTAND
 - Offizieller Patch: Crimson Desert 2.02.00 vom 11.09.2026.
 - Diese ASI wurde fuer den 2.02-Audit neu gebaut. Ein echter Laufzeittest gegen
   DEINE konkrete CrimsonDesert.exe bleibt trotzdem erforderlich; deshalb schreibt
-  v1.2.0 ein detailliertes Runtime-Log.
+  die Mod ein detailliertes Runtime-Log.
 
 PERMANENT AKTIV - KEIN HOTKEY
 - God Mode / HP bleibt voll.
@@ -46,22 +46,16 @@ HALTBARKEIT
 - Bereits beschaedigte Ausruestung wird nicht automatisch repariert; weiterer
   Verbrauch soll ab Aktivierung blockiert werden.
 
-STACK 999 - SICHERHEITSKORREKTUR
-v1.1.1 setzte die Max-Stack-Definition noch global fuer jede Itemdefinition.
-Das ist nach aktuellem Modding-Stand NICHT sicher: globale Stackability kann
-spezielle Buff-/Containeritems beim Start zerstoeren, und Gear-Stacks koennen
-Equip-Kollisionen verursachen.
-
-v1.2.0 macht deshalb NUR Folgendes:
-- Eine Itemdefinition wird nur angehoben, wenn ihr originaler Stack-Cap bereits
-  aktiv ist UND der originale Max-Stack groesser als 1 ist.
-- Original Max-Stack 1 bleibt unangetastet: Waffen, Ruestungen, Spezialitems,
-  Container usw. werden NICHT zwangsweise stackbar gemacht.
-- Ein vorhandener Cap >= 999 wird NICHT reduziert.
-- Ergebnis: bereits nativ stackbare Items erhalten mindestens 999, ohne
-  Non-Stackable-Gear zu konvertieren.
+STACK / INVENTAR
+- KOMPLETT ENTFERNT.
+- Kein Inventory-Modul wird in diese ASI kompiliert.
+- Kein SetAllMaxStackSizes-Aufruf.
+- Keine Aenderung an Stack-Limits oder Stackability.
+- Waffen/Ruestungen bleiben exakt nach Originalspiel stackbar oder nicht stackbar.
+- Itemmengen und Itemverbrauch bleiben vollstaendig original.
 
 ABSICHTLICH NORMAL / UNVERAENDERT
+- Stack-Limits und Stackability
 - Itemmengen
 - Itemverbrauch
 - Munition
@@ -70,7 +64,6 @@ ABSICHTLICH NORMAL / UNVERAENDERT
 - ausgehender Spielerschaden
 - Inventar-Slotanzahl
 - keine Item-Erzeugung
-- keine unterschiedlichen Waffen/Ruestungsinstanzen werden zusammengelegt
 - kein Teleport / keine Zeit- oder World-Hacks
 
 DIAGNOSELOG
@@ -80,7 +73,7 @@ Das Log zeigt unter anderem:
 - erkannte CrimsonDesert.exe-Dateiversion
 - ob direkte Stamina-/Spirit-Hooks gefunden wurden
 - ob normaler/Abyss-Haltbarkeitshook gefunden wurde
-- ob Safe-Stack angewendet wurde
+- ausdrueckliche Meldung, dass Inventory/Stack NICHT einkompiliert ist
 - Anzahl der live aufgeloesten HP-/Stamina-/Spirit-Entries
 - Trinitys eigene AOB-/Hook-Warnungen
 

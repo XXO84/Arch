@@ -30,6 +30,7 @@ FetchContent_MakeAvailable(safetyhook)
 
 add_library(AbsoluteSurvival SHARED
   src/absolute_survival_main.cpp
+  src/resource_guard.cpp
   src/durability_guard.cpp
   src/game/player.cpp
   src/game/inventory.cpp

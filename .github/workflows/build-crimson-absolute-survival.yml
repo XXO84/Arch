@@ -1,0 +1,239 @@
+name: Build Crimson Desert Absolute Survival
+
+on:
+  push:
+    branches:
+      - codex/crimson-absolute-survival
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout build branch
+        uses: actions/checkout@v4
+
+      - name: Fetch pinned Trinity MIT source
+        shell: pwsh
+        run: |
+          git clone --filter=blob:none https://github.com/XeTrinityz/Trinity.git TrinitySrc
+          git -C TrinitySrc checkout 70c9a00dd6e10b2081d706a837756844c11f5c2b
+          if ((git -C TrinitySrc rev-parse HEAD).Trim() -ne '70c9a00dd6e10b2081d706a837756844c11f5c2b') { throw 'Pinned Trinity commit mismatch' }
+
+      - name: Create headless Absolute Survival source
+        shell: pwsh
+        run: |
+          $p = 'TrinitySrc/src/game/player.cpp'
+          $s = Get-Content -Raw -LiteralPath $p
+
+          $must = @(
+            'if (st.godMode    && InSet(g_hpEntries,     kMaxPlayers,     e)) PinEntry(e);',
+            'if (st.infStamina && InSet(g_stamEntries,   kMaxStatEntries, e)) PinEntry(e);',
+            'if (st.infSpirit  && InSet(g_spiritEntries, kMaxStatEntries, e)) PinEntry(e);'
+          )
+          foreach ($m in $must) { if (-not $s.Contains($m)) { throw "Expected upstream line missing: $m" } }
+
+          $s = $s.Replace('if (st.godMode    && InSet(g_hpEntries,     kMaxPlayers,     e)) PinEntry(e);',
+                          'if (InSet(g_hpEntries,     kMaxPlayers,     e)) PinEntry(e);')
+          $s = $s.Replace('if (st.infStamina && InSet(g_stamEntries,   kMaxStatEntries, e)) PinEntry(e);',
+                          'if (InSet(g_stamEntries,   kMaxStatEntries, e)) PinEntry(e);')
+          $s = $s.Replace('if (st.infSpirit  && InSet(g_spiritEntries, kMaxStatEntries, e)) PinEntry(e);',
+                          'if (InSet(g_spiritEntries, kMaxStatEntries, e)) PinEntry(e);')
+
+          $oldActive = @'
+        bool AnyStatFeatureActive(const State& st)
+        {
+            return st.godMode || st.infStamina || st.infSpirit ||
+                   st.dmgInMult != 1.0f || st.dmgOutMult != 1.0f;
+        }
+'@
+          $newActive = @'
+        bool AnyStatFeatureActive(const State& st)
+        {
+            static_cast<void>(st);
+            return true; // Absolute Survival is permanently active.
+        }
+'@
+          if (-not $s.Contains($oldActive)) { throw 'AnyStatFeatureActive upstream block changed' }
+          $s = $s.Replace($oldActive, $newActive)
+
+          # Do NOT install the damage-multiplier dispatcher: Absolute Survival only needs the
+          # stat-commit funnel. This also leaves outgoing damage at normal game behavior.
+          $s = [regex]::Replace(
+            $s,
+            '(?s)\r?\n\s*// Hook the damage-apply dispatcher for the damage multipliers\..*?&g_damageHookTarget\);',
+            "`r`n        // Absolute Survival: damage-multiplier hook intentionally omitted."
+          )
+          if ($s.Contains('mem::InstallHook("player: damage-apply"')) { throw 'Damage multiplier hook was not removed' }
+
+          Set-Content -LiteralPath $p -Value $s -Encoding utf8
+
+          @'
+#include <Windows.h>
+#include <atomic>
+#include <cwchar>
+#include <MinHook.h>
+
+#include "game/player.h"
+
+namespace {
+std::atomic<bool> g_running{true};
+
+bool IsCrimsonDesertHost()
+{
+    wchar_t path[MAX_PATH]{};
+    const DWORD n = GetModuleFileNameW(nullptr, path, MAX_PATH);
+    if (n == 0 || n >= MAX_PATH) return false;
+    const wchar_t* name = wcsrchr(path, L'\\');
+    name = name ? name + 1 : path;
+    return _wcsicmp(name, L"CrimsonDesert.exe") == 0;
+}
+
+DWORD WINAPI AbsoluteSurvivalThread(void*)
+{
+    if (!IsCrimsonDesertHost()) return 0;
+    if (MH_Initialize() != MH_OK) return 1;
+
+    trinity::game::Player::Install();
+
+    // Rebuild the live protagonist set frequently. The actual HP/Stamina/Spirit
+    // protection runs synchronously inside the game's stat-commit hook.
+    while (g_running.load(std::memory_order_acquire))
+    {
+        trinity::game::Player::RefreshSelf();
+        Sleep(8);
+    }
+
+    trinity::game::Player::Remove();
+    MH_Uninitialize();
+    return 0;
+}
+}
+
+BOOL APIENTRY DllMain(HMODULE module, DWORD reason, LPVOID)
+{
+    if (reason == DLL_PROCESS_ATTACH)
+    {
+        DisableThreadLibraryCalls(module);
+        g_running.store(true, std::memory_order_release);
+        HANDLE thread = CreateThread(nullptr, 0, AbsoluteSurvivalThread, nullptr, 0, nullptr);
+        if (thread) CloseHandle(thread);
+    }
+    else if (reason == DLL_PROCESS_DETACH)
+    {
+        g_running.store(false, std::memory_order_release);
+    }
+    return TRUE;
+}
+'@ | Set-Content -LiteralPath 'TrinitySrc/src/absolute_survival_main.cpp' -Encoding utf8
+
+          @'
+cmake_minimum_required(VERSION 3.20)
+project(CrimsonDesertAbsoluteSurvival LANGUAGES CXX)
+
+if(NOT WIN32)
+  message(FATAL_ERROR "Windows x64 only")
+endif()
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+
+include(FetchContent)
+FetchContent_Declare(
+  minhook
+  GIT_REPOSITORY https://github.com/TsudaKageyu/minhook.git
+  GIT_TAG master
+)
+FetchContent_MakeAvailable(minhook)
+
+add_library(AbsoluteSurvival SHARED
+  src/absolute_survival_main.cpp
+  src/game/player.cpp
+  src/mem/scanner.cpp
+)
+
+target_include_directories(AbsoluteSurvival PRIVATE src)
+target_link_libraries(AbsoluteSurvival PRIVATE minhook)
+target_compile_definitions(AbsoluteSurvival PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX _CRT_SECURE_NO_WARNINGS)
+
+set_target_properties(AbsoluteSurvival PROPERTIES
+  PREFIX ""
+  SUFFIX ".asi"
+  OUTPUT_NAME "CrimsonDesert_AbsoluteSurvival"
+)
+
+if(MSVC)
+  target_compile_options(AbsoluteSurvival PRIVATE /W4 /guard:cf)
+  target_link_options(AbsoluteSurvival PRIVATE /DYNAMICBASE /HIGHENTROPYVA /NXCOMPAT /guard:cf)
+endif()
+'@ | Set-Content -LiteralPath 'TrinitySrc/CMakeLists.txt' -Encoding utf8
+
+      - name: Configure x64 Release
+        shell: pwsh
+        run: cmake -S TrinitySrc -B TrinitySrc/build -G "Visual Studio 17 2022" -A x64
+
+      - name: Build x64 Release
+        shell: pwsh
+        run: cmake --build TrinitySrc/build --config Release --parallel
+
+      - name: Validate and package
+        shell: pwsh
+        run: |
+          $asi = 'TrinitySrc/build/Release/CrimsonDesert_AbsoluteSurvival.asi'
+          if (-not (Test-Path -LiteralPath $asi -PathType Leaf)) { throw 'ASI output missing' }
+          $bytes = [IO.File]::ReadAllBytes($asi)
+          if ($bytes.Length -lt 4096 -or $bytes[0] -ne 0x4D -or $bytes[1] -ne 0x5A) { throw 'Output is not a valid PE/MZ binary' }
+
+          New-Item -ItemType Directory -Force -Path package | Out-Null
+          Copy-Item $asi package/
+          Copy-Item TrinitySrc/LICENSE package/LICENSE_Trinity_MIT.txt
+
+          @'
+Crimson Desert - Absolute Survival v1.0.0
+==========================================
+
+Basis: Trinity by XeTrinityz, MIT License, pinned source commit
+70c9a00dd6e10b2081d706a837756844c11f5c2b.
+
+Permanent aktiv, ohne Hotkey:
+- God Mode / HP bleibt voll
+- kein Kampf-, Fall-, Umwelt- oder sonstiger HP-Schaden am Spieler
+- Infinite Stamina / kein Ausdauerverbrauch
+- Infinite Spirit / kein Spirit-Ressourcenverbrauch
+
+Absichtlich NICHT enthalten/aktiviert:
+- keine Inventar-Aenderung
+- kein Item-Gain/Item-Consumption-Hook
+- keine Munitions-/Trank-/Itemmengen-Aenderung
+- keine Outgoing-Damage-Aenderung
+- kein Teleport, kein World-/Time-Hack, kein Inventory Editor
+
+Installation:
+Ein ASI Loader muss vorhanden sein. Dann CrimsonDesert_AbsoluteSurvival.asi
+in den Ordner legen, aus dem dein Loader .asi-Plugins laedt (typisch bin64).
+Nur im Singleplayer verwenden.
+
+Kompatibilitaet:
+Die Mod verwendet Signatur-Scanning statt fester Adressen. Wenn eine Signatur
+nach einem Spielupdate nicht mehr passt, wird der betroffene Hook nicht gesetzt,
+statt eine feste alte Adresse zu patchen.
+'@ | Set-Content package/README_DE.txt -Encoding utf8
+
+          $hash = (Get-FileHash $asi -Algorithm SHA256).Hash
+          "CrimsonDesert_AbsoluteSurvival.asi SHA256=$hash" | Set-Content package/SHA256.txt -Encoding ascii
+          Compress-Archive -Path package/* -DestinationPath CrimsonDesert_AbsoluteSurvival_v1.0.0.zip -Force
+          Write-Host "ASI SHA256: $hash"
+
+      - name: Upload compiled mod
+        uses: actions/upload-artifact@v4
+        with:
+          name: CrimsonDesert_AbsoluteSurvival_v1.0.0
+          path: CrimsonDesert_AbsoluteSurvival_v1.0.0.zip
+          if-no-files-found: error
+          retention-days: 7

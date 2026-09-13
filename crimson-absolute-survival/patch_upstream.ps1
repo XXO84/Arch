@@ -7,7 +7,6 @@ if (-not (Test-Path -LiteralPath $playerH -PathType Leaf)) { throw "player.h not
 
 $s = Get-Content -Raw -LiteralPath $player
 
-# Permanent protection at the existing stat-commit hook.
 $replacements = [ordered]@{
     'if (st.godMode    && InSet(g_hpEntries,     kMaxPlayers,     e)) PinEntry(e);' = 'if (InSet(g_hpEntries,     kMaxPlayers,     e)) PinEntry(e);'
     'if (st.infStamina && InSet(g_stamEntries,   kMaxStatEntries, e)) PinEntry(e);' = 'if (InSet(g_stamEntries,   kMaxStatEntries, e)) PinEntry(e);'
@@ -18,21 +17,17 @@ foreach ($old in $replacements.Keys) {
     $s = $s.Replace($old, $replacements[$old])
 }
 
-# IMPORTANT CURRENT RESOURCE MAPPING FIX.
-# Trinity's initial source treats type 20 as a stamina/sprint gauge. The newer
-# Player Status Modifier resolver documents current stamina as type 19 and
-# current spirit as type 20, with 17/18 retained as legacy/secondary spirit
-# resources. Using the old mapping is why Absolute Survival v1.1.0 did not stop
-# the user's current stamina drain.
-$oldStam = 'bool IsStaminaType(int32_t t) { return t == StatType_Stamina || t == StatType_SprintSt; }'
-$newStam = 'bool IsStaminaType(int32_t t) { return t == 19; } // current player stamina'
-if (-not $s.Contains($oldStam)) { throw 'Pinned IsStaminaType line changed.' }
-$s = $s.Replace($oldStam, $newStam)
-
-$oldSpirit = 'bool IsSpiritType(int32_t t) { return t == StatType_Spirit || t == StatType_SpiritPool; }'
-$newSpirit = 'bool IsSpiritType(int32_t t) { return t == 20 || t == 17 || t == 18; } // current + legacy spirit resources'
-if (-not $s.Contains($oldSpirit)) { throw 'Pinned IsSpiritType line changed.' }
-$s = $s.Replace($oldSpirit, $newSpirit)
+# Current resource mapping: recent PSM resolver uses Stamina=19, Spirit=20;
+# 17/18 are legacy/secondary spirit-like resources. Trinity's initial mapping
+# treated 20 as stamina, which caused v1.1.0 to pin the wrong gauge.
+$stamPattern = 'bool\s+IsStaminaType\(int32_t\s+t\)\s*\{[^\r\n}]*\}'
+$spiritPattern = 'bool\s+IsSpiritType\(int32_t\s+t\)\s*\{[^\r\n}]*\}'
+$stamMatches = [regex]::Matches($s, $stamPattern)
+$spiritMatches = [regex]::Matches($s, $spiritPattern)
+if ($stamMatches.Count -ne 1) { throw "Expected exactly one IsStaminaType definition, found $($stamMatches.Count)." }
+if ($spiritMatches.Count -ne 1) { throw "Expected exactly one IsSpiritType definition, found $($spiritMatches.Count)." }
+$s = [regex]::Replace($s, $stamPattern, 'bool IsStaminaType(int32_t t) { return t == 19; } // current player stamina', 1)
+$s = [regex]::Replace($s, $spiritPattern, 'bool IsSpiritType(int32_t t) { return t == 20 || t == 17 || t == 18; } // current + legacy spirit resources', 1)
 
 $oldActive = @"
         bool AnyStatFeatureActive(const State& st)
@@ -51,15 +46,10 @@ $newActive = @"
 if (-not $s.Contains($oldActive)) { throw 'AnyStatFeatureActive upstream block changed.' }
 $s = $s.Replace($oldActive, $newActive)
 
-# Do not install the battle-damage multiplier dispatcher. Absolute Survival
-# protects HP at the lower stat-commit choke point and leaves outgoing damage normal.
 $pattern = '(?s)\r?\n\s*// Hook the damage-apply dispatcher for the damage multipliers\..*?&g_damageHookTarget\);'
 $s = [regex]::Replace($s, $pattern, "`r`n        // Absolute Survival: damage-multiplier hook intentionally omitted.")
 if ($s.Contains('mem::InstallHook("player: damage-apply"')) { throw 'Damage multiplier hook was not removed.' }
 
-# Add a polling fallback. This pins only already-resolved protagonist entries;
-# no NPC/enemy stat is touched. It is deliberately independent of StatCommit so
-# Stamina/Spirit stay full even when a game patch writes those gauges elsewhere.
 $readyNeedle = @"
     bool Player::Ready()
     {
@@ -90,7 +80,6 @@ $forceBlock = @"
 "@
 if (-not $s.Contains($readyNeedle)) { throw 'Player::Ready block changed.' }
 $s = $s.Replace($readyNeedle, $forceBlock)
-
 Set-Content -LiteralPath $player -Value $s -Encoding utf8
 
 $h = Get-Content -Raw -LiteralPath $playerH
@@ -99,4 +88,4 @@ if (-not $h.Contains($declNeedle)) { throw 'Player::RefreshSelf declaration chan
 $h = $h.Replace($declNeedle, "        static void RefreshSelf();`r`n`r`n        // Fallback hard-lock for current builds whose resource writes bypass StatCommit.`r`n        static void ForceAbsoluteResources();")
 Set-Content -LiteralPath $playerH -Value $h -Encoding utf8
 
-Write-Host 'player.cpp patched: current stamina=type19, spirit=type20/17/18, permanent commit guard + hard-lock fallback.'
+Write-Host 'player.cpp patched: stamina=type19, spirit=type20/17/18, commit guard + hard-lock fallback.'

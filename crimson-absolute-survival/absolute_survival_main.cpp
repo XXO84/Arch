@@ -30,20 +30,29 @@ DWORD WINAPI AbsoluteSurvivalThread(void*)
     absolute_survival::InstallDurabilityGuard();
 
     bool stackApplied = false;
+    DWORD lastResolve = 0;
 
-    // The player resolver follows protagonist swaps/transforms. Stack size is a
-    // shared ItemInfo-definition-table override, so it only needs one successful
-    // application; retry until the table is available. No quantity/item-consume
-    // path is modified.
+    // Resource protection is deliberately two-layered:
+    //  1) the stat-commit hook blocks normal HP/Stamina/Spirit writes immediately;
+    //  2) ForceAbsoluteResources continuously restores the already-resolved player
+    //     gauges, covering current game builds where a resource write bypasses that
+    //     commit funnel. Player discovery itself is only refreshed ~60 Hz so this
+    //     fallback does not repeatedly walk the complete character list.
     while (g_running.load(std::memory_order_acquire)) {
-        trinity::game::Player::RefreshSelf();
+        const DWORD now = GetTickCount();
+        if (lastResolve == 0 || now - lastResolve >= 16) {
+            trinity::game::Player::RefreshSelf();
+            lastResolve = now;
+        }
+
+        trinity::game::Player::ForceAbsoluteResources();
+
         if (!stackApplied)
             stackApplied = trinity::game::Inventory::SetAllMaxStackSizes(true, 999);
-        Sleep(8);
+
+        Sleep(1);
     }
 
-    // Restore the in-memory table before unloading when possible. Process exit
-    // would discard it anyway, but explicit cleanup keeps manual ASI unload sane.
     if (stackApplied)
         trinity::game::Inventory::SetAllMaxStackSizes(false, 999);
 

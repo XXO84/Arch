@@ -7,7 +7,6 @@
 #include <MinHook.h>
 
 #include "core/logger.h"
-#include "game/inventory.h"
 #include "game/player.h"
 #include "durability_guard.h"
 #include "resource_guard.h"
@@ -72,7 +71,7 @@ DWORD WINAPI AbsoluteSurvivalThread(void*)
     if (!IsCrimsonDesertHost()) return 0;
 
     ResetAuditLog();
-    LOG_OK("AbsoluteSurvival v1.2.0 AUDITED-2.02 starting.");
+    LOG_OK("AbsoluteSurvival v1.2.0 AUDITED-2.02 NO-STACK starting.");
     LogHostVersion();
 
     if (MH_Initialize() != MH_OK) {
@@ -81,19 +80,15 @@ DWORD WINAPI AbsoluteSurvivalThread(void*)
     }
 
     trinity::game::Player::Install();
-    const bool inventoryInstalled = trinity::game::Inventory::Install();
     const bool resourceDirect = absolute_survival::InstallResourceGuard();
     const bool durability = absolute_survival::InstallDurabilityGuard();
 
-    LOG(inventoryInstalled ? "AbsoluteSurvival: item-definition resolver installed."
-                           : "AbsoluteSurvival: item-definition resolver unavailable; Stack 999 disabled.");
     LOG(resourceDirect ? "AbsoluteSurvival: at least one direct resource-cost hook installed."
                        : "AbsoluteSurvival: direct cost hooks unavailable; StatCommit + hard-lock fallback remains.");
     LOG(durability ? "AbsoluteSurvival: at least one durability hook installed."
                    : "AbsoluteSurvival: durability signatures did not resolve; durability protection unavailable.");
+    LOG_OK("AbsoluteSurvival: inventory/stack modification is NOT compiled into this build.");
 
-    bool stackApplied = false;
-    bool stackReported = false;
     DWORD lastResolve = 0;
     DWORD lastDiag = 0;
     int lastHp = -1, lastStamina = -1, lastSpirit = -1;
@@ -113,16 +108,6 @@ DWORD WINAPI AbsoluteSurvivalThread(void*)
 
         trinity::game::Player::ForceAbsoluteResources();
 
-        // The patched SetAllMaxStackSizes is conservative in v1.2.0: it only
-        // raises an already-active native cap >1 and never flips non-stackable
-        // definitions (gear/special/container items) to stackable.
-        if (inventoryInstalled && !stackApplied)
-            stackApplied = trinity::game::Inventory::SetAllMaxStackSizes(true, 999);
-        if (stackApplied && !stackReported) {
-            LOG_OK("AbsoluteSurvival: safe native Stack >=999 override applied.");
-            stackReported = true;
-        }
-
         if (lastDiag == 0 || now - lastDiag >= 1000) {
             int hp = 0, stamina = 0, spirit = 0;
             trinity::game::Player::GetResolvedCounts(&hp, &stamina, &spirit);
@@ -139,12 +124,8 @@ DWORD WINAPI AbsoluteSurvivalThread(void*)
         Sleep(1);
     }
 
-    if (stackApplied)
-        trinity::game::Inventory::SetAllMaxStackSizes(false, 999);
-
     absolute_survival::RemoveDurabilityGuard();
     absolute_survival::RemoveResourceGuard();
-    trinity::game::Inventory::Remove();
     trinity::game::Player::Remove();
     MH_Uninitialize();
     LOG("AbsoluteSurvival: shutdown complete.");

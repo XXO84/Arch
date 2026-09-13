@@ -38,13 +38,21 @@ jobs:
           & ./crimson-absolute-survival/patch_upstream.ps1
 
           $patchedPlayer = Get-Content -Raw TrinitySrc/src/game/player.cpp
-          $patchedInv = Get-Content -Raw TrinitySrc/src/game/inventory.cpp
           $patchedLogger = Get-Content -Raw TrinitySrc/src/core/logger.h
+          $main = Get-Content -Raw TrinitySrc/src/absolute_survival_main.cpp
+          $cmake = Get-Content -Raw TrinitySrc/CMakeLists.txt
+          $patch = Get-Content -Raw crimson-absolute-survival/patch_upstream.ps1
+
           if ($patchedPlayer -notmatch 'IsStaminaType\(int32_t t\) \{ return t == 19; \}') { throw 'Stamina type 19 patch missing' }
           if ($patchedPlayer -notmatch 't == 20 \|\| t == 17 \|\| t == 18 \|\| t == 21') { throw 'Spirit/action pool patch missing' }
           if ($patchedPlayer -notmatch 'InSet\(g_targetOwners, kMaxPlayers') { throw 'Incoming damage guard missing' }
-          if ($patchedInv -notmatch 'origCap == 0 \|\| origVal <= 1 \|\| origVal >= value') { throw 'Safe stack guard missing' }
           if ($patchedLogger -notmatch 'AbsoluteSurvival\.log') { throw 'File logger patch missing' }
+
+          # NO-STACK hard gate: inventory/stack code must not be part of this build.
+          if ($main -match 'game/inventory\.h|Inventory::|SetAllMaxStackSizes|stackApplied') { throw 'Inventory/stack reference present in main' }
+          if ($cmake -match 'game/inventory\.cpp') { throw 'inventory.cpp is still compiled' }
+          if ($patch -match 'SetAllMaxStackSizes|MaxStackCount|ApplyMaxStackCap|safe native stacks') { throw 'Stack patch logic still present' }
+          Write-Host 'NO-STACK audit passed: no inventory module or stack override is compiled.'
 
       - name: Configure x64 Release
         shell: pwsh
@@ -78,7 +86,8 @@ jobs:
 
           $hash = (Get-FileHash $asi -Algorithm SHA256).Hash
           "CrimsonDesert_AbsoluteSurvival.asi SHA256=$hash" | Set-Content package/SHA256.txt -Encoding ascii
-          Compress-Archive -Path package/* -DestinationPath CrimsonDesert_AbsoluteSurvival_v1.2.0_AUDITED_2.02.zip -Force
+          $zip = 'CrimsonDesert_AbsoluteSurvival_v1.2.0_AUDITED_2.02_NO_STACK.zip'
+          Compress-Archive -Path package/* -DestinationPath $zip -Force
           Write-Host "ASI SHA256: $hash"
           Write-Host "ASI size: $($bytes.Length)"
           Write-Host ('PE Machine: 0x{0:X4}' -f $machine)
@@ -86,7 +95,7 @@ jobs:
       - name: Upload compiled mod
         uses: actions/upload-artifact@v4
         with:
-          name: CrimsonDesert_AbsoluteSurvival_v1.2.0_AUDITED_2.02
-          path: CrimsonDesert_AbsoluteSurvival_v1.2.0_AUDITED_2.02.zip
+          name: CrimsonDesert_AbsoluteSurvival_v1.2.0_AUDITED_2.02_NO_STACK
+          path: CrimsonDesert_AbsoluteSurvival_v1.2.0_AUDITED_2.02_NO_STACK.zip
           if-no-files-found: error
           retention-days: 7

@@ -3,7 +3,6 @@
 #include <cwchar>
 #include <MinHook.h>
 
-#include "core/state.h"
 #include "game/inventory.h"
 #include "game/player.h"
 #include "durability_guard.h"
@@ -21,36 +20,32 @@ bool IsCrimsonDesertHost()
     return _wcsicmp(name, L"CrimsonDesert.exe") == 0;
 }
 
-void EnforceAbsoluteProfile()
-{
-    auto& st = trinity::State::Get();
-
-    // Inventory amounts/consumption remain vanilla. Only the definition-wide
-    // maximum stack cap is overridden.
-    st.invStackSize = true;
-    st.invStackSizeVal = 999;
-    st.invSlotSize = false;
-}
-
 DWORD WINAPI AbsoluteSurvivalThread(void*)
 {
     if (!IsCrimsonDesertHost()) return 0;
     if (MH_Initialize() != MH_OK) return 1;
 
-    EnforceAbsoluteProfile();
-
     trinity::game::Player::Install();
     trinity::game::Inventory::Install();
     absolute_survival::InstallDurabilityGuard();
 
-    // Rebuild live protagonist state, keep the 999-stack definition override
-    // applied across save loads, and never touch item quantities.
+    bool stackApplied = false;
+
+    // The player resolver follows protagonist swaps/transforms. Stack size is a
+    // shared ItemInfo-definition-table override, so it only needs one successful
+    // application; retry until the table is available. No quantity/item-consume
+    // path is modified.
     while (g_running.load(std::memory_order_acquire)) {
-        EnforceAbsoluteProfile();
         trinity::game::Player::RefreshSelf();
-        trinity::game::Inventory::Tick();
+        if (!stackApplied)
+            stackApplied = trinity::game::Inventory::SetAllMaxStackSizes(true, 999);
         Sleep(8);
     }
+
+    // Restore the in-memory table before unloading when possible. Process exit
+    // would discard it anyway, but explicit cleanup keeps manual ASI unload sane.
+    if (stackApplied)
+        trinity::game::Inventory::SetAllMaxStackSizes(false, 999);
 
     absolute_survival::RemoveDurabilityGuard();
     trinity::game::Inventory::Remove();

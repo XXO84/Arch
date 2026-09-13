@@ -67,7 +67,7 @@ jobs:
 
           $hash = (Get-FileHash $asi -Algorithm SHA256).Hash
           "CrimsonDesert_AbsoluteSurvival.asi SHA256=$hash" | Set-Content package/SHA256.txt -Encoding ascii
-          Compress-Archive -Path package/* -DestinationPath CrimsonDesert_AbsoluteSurvival_v1.1.0.zip -Force
+          Compress-Archive -Path package/* -DestinationPath CrimsonDesert_AbsoluteSurvival_v1.1.1.zip -Force
           Write-Host "ASI SHA256: $hash"
           Write-Host "ASI size: $($bytes.Length)"
           Write-Host ('PE Machine: 0x{0:X4}' -f $machine)
@@ -75,7 +75,7 @@ jobs:
       - name: Upload compiled mod
         uses: actions/upload-artifact@v4
         with:
-          name: CrimsonDesert_AbsoluteSurvival_v1.1.0
-          path: CrimsonDesert_AbsoluteSurvival_v1.1.0.zip
+          name: CrimsonDesert_AbsoluteSurvival_v1.1.1
+          path: CrimsonDesert_AbsoluteSurvival_v1.1.1.zip
           if-no-files-found: error
           retention-days: 7

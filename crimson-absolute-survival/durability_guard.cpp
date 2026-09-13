@@ -12,10 +12,10 @@ namespace absolute_survival
     {
         constexpr uintptr_t kMinPointer = 0x10000;
 
-        // Current open RE for Crimson Desert exposes two durability-decrement paths:
-        // the normal equipment/tool delta path and the Abyss/special-equipment delta path.
-        // We hook immediately before the consuming ADD instruction and clear only the
-        // 16-bit decrement operand. Item quantities are not touched here.
+        // Two separate wear paths exist in the current open RE:
+        // normal equipment/tools and Abyss/special equipment.
+        // The hooks run directly before the consuming arithmetic and clear only
+        // its 16-bit wear operand. Inventory quantities are never modified here.
         constexpr const char* kSigDurabilityDelta =
             "C1 79 C5 C1 06 66 41 03 C0 66 89 45 EC C4 C1 79 C5 C1 07 66 41 03 C1 66 89";
         constexpr size_t kOffDurabilityDelta = 5;
@@ -38,8 +38,7 @@ namespace absolute_survival
             if (ctx.rbp < kMinPointer)
                 return;
 
-            // r13w is the durability-consumption delta at this site.
-            // Setting it to zero prevents wear while leaving item amount/count untouched.
+            // r13w is the durability-consumption operand at this site.
             if ((ctx.r13 & 0xFFFFu) != 0)
                 ZeroLow16(ctx.r13);
 #endif
@@ -51,7 +50,7 @@ namespace absolute_survival
             if (ctx.rbx < kMinPointer)
                 return;
 
-            // Separate special/Abyss durability decrement path.
+            // Separate special/Abyss durability-consumption path.
             if ((ctx.r13 & 0xFFFFu) != 0)
                 ZeroLow16(ctx.r13);
 #endif
@@ -63,7 +62,7 @@ namespace absolute_survival
                               SafetyHookMid& out,
                               void (*callback)(SafetyHookContext&))
         {
-            const size_t count = trinity::mem::CountMatches(sig, {}, 8);
+            const size_t count = trinity::mem::CountMatches(sig, 8);
             if (count != 1)
             {
                 LOG_WARN("AbsoluteSurvival: %s signature count=%zu; hook skipped.", name, count);

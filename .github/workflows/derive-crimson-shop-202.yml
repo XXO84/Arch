@@ -1,0 +1,45 @@
+name: Derive Crimson Tavern 2.02
+
+on:
+  push:
+    branches:
+      - codex/crimson-shop-202
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  derive:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Clone CDUMM reference
+        run: git clone --depth 1 https://github.com/faisalkindi/CrimsonDesert-UltimateModsManager.git cdumm
+      - name: Derive Tavern key from September fixture
+        shell: bash
+        run: |
+          python - <<'PY'
+          import sys,zlib
+          from pathlib import Path
+          sys.path.insert(0, str(Path('cdumm/src').resolve()))
+          from cdumm.semantic.parser import parse_pabgh_index, _parse_entry_header
+          base=Path('cdumm/tests/fixtures/vanilla_b25116796')
+          body=zlib.decompress((base/'storeinfo.pabgb.zlib').read_bytes())
+          header=zlib.decompress((base/'storeinfo.pabgh.zlib').read_bytes())
+          key_size, offsets=parse_pabgh_index(header,'storeinfo')
+          hits=[]
+          for key,off in offsets.items():
+              eid,name,payload=_parse_entry_header(body,off,key_size)
+              if name=='Store_Her_Tavern':
+                  hits.append((key,off,eid,payload))
+          print('TAVERN_HITS=',hits)
+          if len(hits)!=1:
+              raise SystemExit(f'Expected exactly one Tavern, got {len(hits)}')
+          key,off,eid,payload=hits[0]
+          print(f'TAVERN_KEY={key}')
+          print(f'TAVERN_OFFSET={off}')
+          print(f'TAVERN_ENTRY_ID={eid}')
+          print(f'TAVERN_PAYLOAD={payload}')
+          PY

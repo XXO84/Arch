@@ -26,16 +26,18 @@ jobs:
           $head = (git -C TrinitySrc rev-parse HEAD).Trim()
           if ($head -ne '70c9a00dd6e10b2081d706a837756844c11f5c2b') { throw 'Pinned Trinity commit mismatch' }
 
-      - name: Apply Absolute Survival patch
+      - name: Apply Absolute Survival source
         shell: pwsh
         run: |
           Copy-Item crimson-absolute-survival/absolute_survival_main.cpp TrinitySrc/src/absolute_survival_main.cpp -Force
+          Copy-Item crimson-absolute-survival/durability_guard.cpp TrinitySrc/src/durability_guard.cpp -Force
+          Copy-Item crimson-absolute-survival/durability_guard.h TrinitySrc/src/durability_guard.h -Force
           Copy-Item crimson-absolute-survival/CMakeLists.txt TrinitySrc/CMakeLists.txt -Force
           & ./crimson-absolute-survival/patch_upstream.ps1
 
       - name: Configure x64 Release
         shell: pwsh
-        run: cmake -S TrinitySrc -B TrinitySrc/build -G "Visual Studio 17 2022" -A x64
+        run: cmake -S TrinitySrc -B TrinitySrc/build -G "Visual Studio 17 2022" -A x64 -DSAFETYHOOK_FETCH_ZYDIS=ON
 
       - name: Build x64 Release
         shell: pwsh
@@ -50,19 +52,30 @@ jobs:
           if ($bytes.Length -lt 4096) { throw 'ASI output unexpectedly small' }
           if ($bytes[0] -ne 0x4D -or $bytes[1] -ne 0x5A) { throw 'ASI is not a PE/MZ image' }
 
+          $lfanew = [BitConverter]::ToInt32($bytes, 0x3C)
+          if ($lfanew -lt 0 -or $lfanew + 6 -ge $bytes.Length) { throw 'Invalid PE header offset' }
+          if ($bytes[$lfanew] -ne 0x50 -or $bytes[$lfanew+1] -ne 0x45 -or $bytes[$lfanew+2] -ne 0 -or $bytes[$lfanew+3] -ne 0) { throw 'Invalid PE signature' }
+          $machine = [BitConverter]::ToUInt16($bytes, $lfanew + 4)
+          if ($machine -ne 0x8664) { throw ('Wrong architecture: 0x{0:X4}' -f $machine) }
+
           New-Item -ItemType Directory -Force -Path package | Out-Null
           Copy-Item $asi package/
           Copy-Item TrinitySrc/LICENSE package/LICENSE_Trinity_MIT.txt
+          $safetyLicense = 'TrinitySrc/build/_deps/safetyhook-src/LICENSE'
+          if (Test-Path -LiteralPath $safetyLicense) { Copy-Item $safetyLicense package/LICENSE_SafetyHook_BSL1.txt }
           Copy-Item crimson-absolute-survival/README_DE.txt package/README_DE.txt
+
           $hash = (Get-FileHash $asi -Algorithm SHA256).Hash
           "CrimsonDesert_AbsoluteSurvival.asi SHA256=$hash" | Set-Content package/SHA256.txt -Encoding ascii
-          Compress-Archive -Path package/* -DestinationPath CrimsonDesert_AbsoluteSurvival_v1.0.0.zip -Force
+          Compress-Archive -Path package/* -DestinationPath CrimsonDesert_AbsoluteSurvival_v1.1.0.zip -Force
           Write-Host "ASI SHA256: $hash"
+          Write-Host "ASI size: $($bytes.Length)"
+          Write-Host ('PE Machine: 0x{0:X4}' -f $machine)
 
       - name: Upload compiled mod
         uses: actions/upload-artifact@v4
         with:
-          name: CrimsonDesert_AbsoluteSurvival_v1.0.0
-          path: CrimsonDesert_AbsoluteSurvival_v1.0.0.zip
+          name: CrimsonDesert_AbsoluteSurvival_v1.1.0
+          path: CrimsonDesert_AbsoluteSurvival_v1.1.0.zip
           if-no-files-found: error
           retention-days: 7

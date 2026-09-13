@@ -1,5 +1,14 @@
-Crimson Desert - Absolute Survival v1.1.0
+Crimson Desert - Absolute Survival v1.1.1
 ==========================================
+
+WICHTIGE KORREKTUR GEGENUEBER v1.1.0
+- v1.1.0 uebernahm aus der Trinity-Basis eine veraltete Ressourcentyp-Zuordnung.
+- Fuer neuere Crimson-Desert-Builds wird Stamina als Stat-Typ 19 behandelt.
+- Spirit wird als Typ 20 behandelt; 17/18 bleiben Legacy-/Neben-Spiritressourcen.
+- v1.1.1 korrigiert diese Zuordnung und hat zusaetzlich einen aktiven Hard-Lock:
+  bereits aufgeloeste Spieler-HP/Stamina/Spirit-Gauges werden dauerhaft auf Max
+  gehalten, selbst wenn ein aktueller Spielbuild einen Write-Pfad ausserhalb des
+  alten StatCommit-Funnels verwendet.
 
 Basis:
 - Trinity by XeTrinityz (MIT), gepinnt auf Commit
@@ -20,8 +29,7 @@ Stack-Regel fuer Waffen/Ruestung:
 - Die Mod setzt nur die maximale Stack-Obergrenze auf 999.
 - Ob zwei Ausruestungsgegenstaende zusammengefuehrt werden duerfen, entscheidet
   weiterhin die originale Identitaets-/Merge-Logik des Spiels.
-- Unterschiedliche Instanzdaten (z.B. unterschiedliche Modifikationen/Sockel/
-  sonstige individuelle Daten) werden NICHT von dieser Mod gleichgemacht.
+- Unterschiedliche Instanzdaten werden NICHT gleichgemacht.
 
 Absichtlich normal/unveraendert:
 - Itemmengen
@@ -34,11 +42,6 @@ Absichtlich normal/unveraendert:
 - keine Item-Erzeugung
 - kein Teleport / keine Zeit- oder World-Hacks
 
-Haltbarkeit:
-- Die Mod blockiert die bekannten normalen und Abyss-Durability-Delta-Pfade.
-- Bereits vor Aktivierung beschaedigte Gegenstaende werden nicht automatisch
-  repariert. Ab Aktivierung soll ihre Haltbarkeit nicht weiter sinken.
-
 Installation:
 Ein funktionierender ASI Loader muss vorhanden sein.
 CrimsonDesert_AbsoluteSurvival.asi in den Ordner legen, aus dem der Loader
@@ -47,11 +50,10 @@ ASI-Plugins laedt (typischerweise bin64).
 Nur im Singleplayer verwenden.
 
 Kompatibilitaet:
-Die Mod nutzt AOB-/Signatur-Scanning statt fester absoluter Adressen. Jeder
-Haltbarkeits-Hook wird nur installiert, wenn sein Byte-Muster im laufenden Build
-eindeutig genau einmal gefunden wird. Bei einem Spielupdate wird ein nicht mehr
-eindeutiger Haltbarkeitspfad uebersprungen statt blind an eine alte Adresse zu
-patchen.
+Die Mod nutzt AOB-/Signatur-Scanning statt fester absoluter Adressen. Haltbarkeits-
+Hooks werden nur bei eindeutigem Muster installiert. Fuer HP/Stamina/Spirit wird
+zusaetzlich der live aufgeloeste Protagonisten-Statblock verwendet; NPC-/Gegner-
+Stats werden nicht gepinnt.
 
 Build:
 Windows Server 2022 / Visual Studio 2022 / x64 Release via GitHub Actions.

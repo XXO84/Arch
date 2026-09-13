@@ -17,29 +17,46 @@ jobs:
       - uses: actions/checkout@v4
       - name: Clone CDUMM reference
         run: git clone --depth 1 https://github.com/faisalkindi/CrimsonDesert-UltimateModsManager.git cdumm
-      - name: Derive Tavern key from September fixture
+      - name: Derive Tavern key and stock from September fixture
         shell: bash
         run: |
           python - <<'PY'
-          import sys,zlib
+          import sys,zlib,json
           from pathlib import Path
           sys.path.insert(0, str(Path('cdumm/src').resolve()))
           from cdumm.semantic.parser import parse_pabgh_index, _parse_entry_header
+          from cdumm.engine.storeinfo_native_parser import detect_storeinfo_layout, locate_stock_list
           base=Path('cdumm/tests/fixtures/vanilla_b25116796')
           body=zlib.decompress((base/'storeinfo.pabgb.zlib').read_bytes())
           header=zlib.decompress((base/'storeinfo.pabgh.zlib').read_bytes())
           key_size, offsets=parse_pabgh_index(header,'storeinfo')
+          sorted_offs=sorted(offsets.values())+[len(body)]
           hits=[]
           for key,off in offsets.items():
               eid,name,payload=_parse_entry_header(body,off,key_size)
               if name=='Store_Her_Tavern':
                   hits.append((key,off,eid,payload))
-          print('TAVERN_HITS=',hits)
           if len(hits)!=1:
               raise SystemExit(f'Expected exactly one Tavern, got {len(hits)}')
           key,off,eid,payload=hits[0]
+          end=sorted_offs[sorted_offs.index(off)+1]
+          layout=detect_storeinfo_layout(body,sorted(offsets.values()))
+          recs,start,stop=locate_stock_list(body,payload,end,key,layout)
           print(f'TAVERN_KEY={key}')
-          print(f'TAVERN_OFFSET={off}')
-          print(f'TAVERN_ENTRY_ID={eid}')
-          print(f'TAVERN_PAYLOAD={payload}')
+          print(f'TAVERN_LAYOUT={layout.label}')
+          print(f'TAVERN_COUNT={len(recs)}')
+          print(f'TAVERN_LIST_SPAN={start}:{stop}')
+          rows=[]
+          for i,r in enumerate(recs,1):
+              row={
+                'slot':i,'body':r.body,'lookup_a':r.lookup_a,
+                'raw_a':r.raw_a,'raw_b':r.raw_b,'raw_c':r.raw_c,
+                'low_price_threshold_count':r.low_price_threshold_count,
+                'raw_d':r.raw_d,'raw_e':r.raw_e,'order_index':r.order_index,
+                'flag_a':r.flag_a,'flag_b':r.flag_b,'flag_c':r.flag_c,
+                'is_restore_item':r.is_restore_item,
+                'sub_data':r.sub_data,
+              }
+              rows.append(row)
+          print('TAVERN_RECORDS_JSON='+json.dumps(rows,separators=(',',':')))
           PY

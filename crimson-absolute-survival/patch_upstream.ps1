@@ -3,9 +3,8 @@ $ErrorActionPreference = 'Stop'
 $srcRoot = Join-Path $PSScriptRoot '..\TrinitySrc\src'
 $player = Join-Path $srcRoot 'game\player.cpp'
 $playerH = Join-Path $srcRoot 'game\player.h'
-$inventory = Join-Path $srcRoot 'game\inventory.cpp'
 $loggerH = Join-Path $srcRoot 'core\logger.h'
-foreach ($p in @($player,$playerH,$inventory,$loggerH)) {
+foreach ($p in @($player,$playerH,$loggerH)) {
     if (-not (Test-Path -LiteralPath $p -PathType Leaf)) { throw "Required upstream file not found: $p" }
 }
 
@@ -52,10 +51,10 @@ $newActive = @"
 if (-not $s.Contains($oldActive)) { throw 'AnyStatFeatureActive upstream block changed.' }
 $s = $s.Replace($oldActive, $newActive)
 
-# Redundant incoming-damage guard. Keep Trinity's pattern-scanned damage hook,
-# but hard-zero only negative HEALTH deltas whose targetOwner is one of the
-# freshly resolved protagonists. Outgoing damage and every NPC-vs-NPC hit stay
-# untouched. The lower StatCommit pin + hard-lock remain as fall/script fallback.
+# Redundant incoming-damage guard. Hard-zero only negative HEALTH deltas whose
+# targetOwner is one of the freshly resolved protagonists. Outgoing damage and
+# every NPC-vs-NPC hit stay untouched. The lower StatCommit pin + hard-lock
+# remain as fall/script fallback.
 $damageGatePattern = 'if\s*\(delta\s*<\s*0\s*&&\s*statusId\s*==\s*StatType_Health\)\s*delta\s*=\s*ScaleDamage\(reinterpret_cast<uintptr_t>\(targetOwner\),\s*sourceCtx,\s*delta\);'
 if ([regex]::Matches($s, $damageGatePattern).Count -ne 1) { throw 'Expected exactly one damage-apply gate.' }
 $damageGateReplacement = @'
@@ -142,37 +141,12 @@ $h = $h.Replace($declNeedle, $decl.TrimEnd())
 Set-Content -LiteralPath $playerH -Value $h -Encoding utf8
 
 # ---------------------------------------------------------------------------
-# Inventory: SAFE 999 stacks only for definitions that are ALREADY stackable.
-# Do not flip non-stackable gear, special buffs or containers to stackable.
-# Also never reduce an existing cap >= 999.
-# ---------------------------------------------------------------------------
-$inv = Get-Content -Raw -LiteralPath $inventory
-$readNeedle = @"
-                    Read64(def + kOff_ItemDef_MaxStackCount, &origVal);
-                    Read8(def + kOff_ItemDef_ApplyMaxStackCap, &origCap);
-                    g_origMaxStack[row]  = origVal;
-"@
-$readReplacement = @"
-                    Read64(def + kOff_ItemDef_MaxStackCount, &origVal);
-                    Read8(def + kOff_ItemDef_ApplyMaxStackCap, &origCap);
-                    // 2.02 safety audit: only an already-active cap >1 is proof
-                    // this definition is natively stackable. Non-stackable gear,
-                    // special buff items and containers remain byte-identical.
-                    if (origCap == 0 || origVal <= 1 || origVal >= value) continue;
-                    g_origMaxStack[row]  = origVal;
-"@
-if (-not $inv.Contains($readNeedle)) { throw 'Inventory max-stack capture block changed.' }
-$inv = $inv.Replace($readNeedle, $readReplacement)
-Set-Content -LiteralPath $inventory -Value $inv -Encoding utf8
-
-# ---------------------------------------------------------------------------
 # File diagnostics: Trinity logger also appends every hook/scanner message to
 # %LOCALAPPDATA%\CrimsonDesert_AbsoluteSurvival\AbsoluteSurvival.log.
 # ---------------------------------------------------------------------------
 $lg = Get-Content -Raw -LiteralPath $loggerH
 $lockNeedle = '            std::lock_guard<std::mutex> lock(Mutex());'
 if ([regex]::Matches($lg, [regex]::Escape($lockNeedle)).Count -lt 2) { throw 'Logger lock layout changed.' }
-# Only patch the lock inside Log(): use the block that immediately follows line.text.
 $logBlockNeedle = @"
             line.text  = msg;
 
@@ -210,4 +184,4 @@ if (-not $lg.Contains($lineNeedle)) { throw 'Logger Line declaration changed.' }
 $lg = $lg.Replace($lineNeedle, $lineReplacement.TrimEnd())
 Set-Content -LiteralPath $loggerH -Value $lg -Encoding utf8
 
-Write-Host 'AUDITED patch applied: resource IDs, incoming damage guard, hard-lock, safe native stacks, file diagnostics.'
+Write-Host 'AUDITED NO-STACK patch applied: resource IDs, incoming damage guard, hard-lock, file diagnostics. No inventory/stack code patched.'

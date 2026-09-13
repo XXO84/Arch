@@ -33,7 +33,6 @@ add_library(AbsoluteSurvival SHARED
   src/resource_guard.cpp
   src/durability_guard.cpp
   src/game/player.cpp
-  src/game/inventory.cpp
   src/mem/scanner.cpp
 )
 
